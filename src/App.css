@@ -123,6 +123,10 @@ button.ghost:hover {
   border-color: #9ca3af;
 }
 
+.summary .hint {
+  margin-top: 8px;
+}
+
 .status {
   color: #047857;
   font-weight: 600;

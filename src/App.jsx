@@ -8,28 +8,33 @@ import { startDecoder } from './decoder'
 const BIT_DURATION_SEC = 0.03
 const PREAMBLE_BITS = [1, 0, 1, 0, 1, 0, 1, 0]
 const MAX_PACKET_AGE_SEC = 10
-const ACCOUNT_KEY = 'echopay-account'
+const ACCOUNTS_KEY = 'echopay-accounts'
+const CURRENT_ACCOUNT_KEY = 'echopay-current'
 
-const loadAccount = () => {
-  const raw = localStorage.getItem(ACCOUNT_KEY)
-  if (!raw) return null
+const loadAccounts = () => {
+  const raw = localStorage.getItem(ACCOUNTS_KEY)
+  if (!raw) return []
   try {
     const parsed = JSON.parse(raw)
-    if (
-      typeof parsed.userId !== 'number' ||
-      typeof parsed.username !== 'string' ||
-      typeof parsed.balance !== 'number'
-    ) {
-      return null
-    }
-    return parsed
+    return Array.isArray(parsed) ? parsed : []
   } catch {
-    return null
+    return []
   }
 }
 
-const saveAccount = (account) => {
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account))
+const saveAccounts = (accounts) => {
+  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts))
+}
+
+const loadCurrentAccountId = () => {
+  const raw = localStorage.getItem(CURRENT_ACCOUNT_KEY)
+  if (!raw) return null
+  const id = Number.parseInt(raw, 10)
+  return Number.isFinite(id) ? id : null
+}
+
+const saveCurrentAccountId = (userId) => {
+  localStorage.setItem(CURRENT_ACCOUNT_KEY, String(userId))
 }
 
 const buildPayload = ({ senderId, amountPaise, timestampSec, nonce }) => {
@@ -65,6 +70,10 @@ function App() {
   const [error, setError] = useState('')
   const [account, setAccount] = useState(null)
   const [usernameInput, setUsernameInput] = useState('')
+  const [emailInput, setEmailInput] = useState('')
+  const [passwordInput, setPasswordInput] = useState('')
+  const [authMode, setAuthMode] = useState('login')
+  const [counterpartyIdInput, setCounterpartyIdInput] = useState('')
   const audioContextRef = useRef(null)
   const decoderRef = useRef(null)
   const bitBufferRef = useRef([])
@@ -72,10 +81,15 @@ function App() {
   const userId = account?.userId ?? 0
 
   useEffect(() => {
-    const stored = loadAccount()
-    if (stored) {
-      setAccount(stored)
-      setUsernameInput(stored.username)
+    const accounts = loadAccounts()
+    const currentId = loadCurrentAccountId()
+    if (currentId) {
+      const current = accounts.find((item) => item.userId === currentId)
+      if (current) {
+        setAccount(current)
+        setUsernameInput(current.username)
+        setEmailInput(current.email)
+      }
     }
     return () => {
       stopListening()
@@ -95,7 +109,11 @@ function App() {
     }
     const amountPaise = Math.round(amountValue * 100)
     if (!account) {
-      setError('Create an account first.')
+      setError('Log in to send.')
+      return
+    }
+    if (!counterpartyIdInput.trim()) {
+      setError('Enter receiver device ID.')
       return
     }
     if (balance < amountValue) {
@@ -160,6 +178,15 @@ function App() {
             stopListening()
             validatePacket(packet)
               .then((data) => {
+                const expectedId = Number.parseInt(counterpartyIdInput, 10)
+                if (!Number.isFinite(expectedId)) {
+                  setError('Enter sender device ID.')
+                  return
+                }
+                if (data.senderId !== expectedId) {
+                  setError('Sender device ID mismatch.')
+                  return
+                }
                 setReceived(data)
                 setError('')
                 if (account) {
@@ -188,24 +215,55 @@ function App() {
   const handleCreateAccount = () => {
     setError('')
     const username = usernameInput.trim()
-    if (!username) {
-      setError('Enter a username.')
+    const email = emailInput.trim()
+    const password = passwordInput.trim()
+    if (!username || !email || !password) {
+      setError('Enter username, email, and password.')
+      return
+    }
+    const accounts = loadAccounts()
+    if (accounts.some((item) => item.email === email)) {
+      setError('Email already exists.')
       return
     }
     const newAccount = {
       userId: crypto.getRandomValues(new Uint32Array(1))[0],
       username,
+      email,
+      password,
       balance: 500,
     }
     // Demo-only account system.
     setAccount(newAccount)
-    saveAccount(newAccount)
+    saveAccounts([...accounts, newAccount])
+    saveCurrentAccountId(newAccount.userId)
+  }
+
+  const handleLogin = () => {
+    setError('')
+    const email = emailInput.trim()
+    const password = passwordInput.trim()
+    if (!email || !password) {
+      setError('Enter email and password.')
+      return
+    }
+    const accounts = loadAccounts()
+    const match = accounts.find((item) => item.email === email && item.password === password)
+    if (!match) {
+      setError('Invalid credentials.')
+      return
+    }
+    setAccount(match)
+    setUsernameInput(match.username)
+    saveCurrentAccountId(match.userId)
   }
 
   const handleResetAccount = () => {
-    localStorage.removeItem(ACCOUNT_KEY)
+    localStorage.removeItem(CURRENT_ACCOUNT_KEY)
     setAccount(null)
     setUsernameInput('')
+    setEmailInput('')
+    setPasswordInput('')
     setReceived(null)
     setError('')
   }
@@ -222,19 +280,51 @@ function App() {
 
       {!account && (
         <section className="card">
-          <h2>Create Account</h2>
+          <h2>{authMode === 'login' ? 'Login' : 'Create Account'}</h2>
           <p className="hint">Demo-only account system.</p>
+          {authMode === 'signup' && (
+            <label className="field">
+              Username
+              <input
+                type="text"
+                value={usernameInput}
+                onChange={(event) => setUsernameInput(event.target.value)}
+                placeholder="Enter a name"
+              />
+            </label>
+          )}
           <label className="field">
-            Username
+            Email
             <input
-              type="text"
-              value={usernameInput}
-              onChange={(event) => setUsernameInput(event.target.value)}
-              placeholder="Enter a name"
+              type="email"
+              value={emailInput}
+              onChange={(event) => setEmailInput(event.target.value)}
+              placeholder="you@example.com"
             />
           </label>
-          <button className="primary" onClick={handleCreateAccount}>
-            Create Account
+          <label className="field">
+            Password
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(event) => setPasswordInput(event.target.value)}
+              placeholder="Demo password"
+            />
+          </label>
+          {authMode === 'login' ? (
+            <button className="primary" onClick={handleLogin}>
+              Login
+            </button>
+          ) : (
+            <button className="primary" onClick={handleCreateAccount}>
+              Create Account
+            </button>
+          )}
+          <button
+            className="ghost"
+            onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+          >
+            {authMode === 'login' ? 'Need an account? Sign up' : 'Have an account? Login'}
           </button>
         </section>
       )}
@@ -244,9 +334,10 @@ function App() {
           <div>
             <h2>{account.username}</h2>
             <p className="balance">Balance ₹{balance.toFixed(2)}</p>
+            <p className="hint">Device ID: {userId}</p>
           </div>
           <button className="ghost" onClick={handleResetAccount}>
-            Reset Account
+            Log Out
           </button>
         </section>
       )}
@@ -276,6 +367,15 @@ function App() {
         <section className="card">
           <h2>Send via Sound</h2>
           <label className="field">
+            Receiver Device ID
+            <input
+              type="number"
+              value={counterpartyIdInput}
+              onChange={(event) => setCounterpartyIdInput(event.target.value)}
+              placeholder="Enter receiver ID"
+            />
+          </label>
+          <label className="field">
             Amount (INR)
             <input
               type="number"
@@ -297,6 +397,15 @@ function App() {
         <section className="card">
           <h2>Receive</h2>
           <p className="hint">Tip: use two devices to see different sender IDs.</p>
+          <label className="field">
+            Sender Device ID
+            <input
+              type="number"
+              value={counterpartyIdInput}
+              onChange={(event) => setCounterpartyIdInput(event.target.value)}
+              placeholder="Enter sender ID"
+            />
+          </label>
           {listening ? (
             <div className="listening">
               <span className="dot" />
