@@ -16,11 +16,21 @@ const signData = async (payload) => {
 }
 
 const verifySignature = async (payload, signature) => {
+  console.log('[DEBUG-SIGNER] Verifying signature for payload:', Array.from(payload).map(b => b.toString(16).padStart(2, '0')).join(' '))
+  console.log('[DEBUG-SIGNER] Expected signature:', Array.from(signature).map(b => b.toString(16).padStart(2, '0')).join(' '))
   const expected = await signData(payload)
-  if (expected.length !== signature.length) return false
-  for (let i = 0; i < expected.length; i += 1) {
-    if (expected[i] !== signature[i]) return false
+  console.log('[DEBUG-SIGNER] Computed signature:', Array.from(expected).map(b => b.toString(16).padStart(2, '0')).join(' '))
+  if (expected.length !== signature.length) {
+    console.log('[DEBUG-SIGNER] Length mismatch:', expected.length, 'vs', signature.length)
+    return false
   }
+  for (let i = 0; i < expected.length; i += 1) {
+    if (expected[i] !== signature[i]) {
+      console.log('[DEBUG-SIGNER] Byte mismatch at index', i, ':', expected[i], 'vs', signature[i])
+      return false
+    }
+  }
+  console.log('[DEBUG-SIGNER] Signature verification PASSED')
   return true
 }
 

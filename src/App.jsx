@@ -48,16 +48,24 @@ const buildPayload = ({ senderId, amountPaise, timestampSec, nonce }) => {
 }
 
 const validatePacket = async (packet) => {
+  console.log('[DEBUG] Validating packet. Packet length:', packet.length)
+  console.log('[DEBUG] Packet hex:', Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' '))
   const { senderId, amountPaise, timestampSec, nonce, signature } = parsePacket(packet)
+  console.log('[DEBUG] Parsed packet:', { senderId, amountPaise, timestampSec, nonce, signatureLength: signature.length })
+  console.log('[DEBUG] Signature hex:', Array.from(signature).map(b => b.toString(16).padStart(2, '0')).join(' '))
   const payload = packet.slice(0, 14)
+  console.log('[DEBUG] Payload (first 14 bytes) hex:', Array.from(payload).map(b => b.toString(16).padStart(2, '0')).join(' '))
   const isValid = await verifySignature(payload, signature)
+  console.log('[DEBUG] Signature verification result:', isValid)
   if (!isValid) {
     throw new Error('Invalid signature')
   }
   const now = Math.floor(Date.now() / 1000)
+  console.log('[DEBUG] Timestamp check - now:', now, 'packet.timestamp:', timestampSec, 'diff:', Math.abs(now - timestampSec))
   if (Math.abs(now - timestampSec) > MAX_PACKET_AGE_SEC) {
     throw new Error('Stale timestamp')
   }
+  console.log('[DEBUG] Packet validation PASSED')
   return { senderId, amountPaise, timestampSec, nonce }
 }
 
@@ -189,29 +197,45 @@ function App() {
             const packetBits = buffer.slice(packetStart, packetStart + PACKET_SIZE * 8)
             if (packetBits.length < PACKET_SIZE * 8) return
             const packet = bitsToBytes(packetBits)
+            console.log('[DEBUG] Decoded packet from bits')
             stopListening()
             validatePacket(packet)
               .then((data) => {
+                console.log('[DEBUG] Packet validation succeeded. Data:', data)
+                console.log('[DEBUG] Current account state:', account)
                 const expectedId = Number.parseInt(counterpartyIdInput, 10)
+                console.log('[DEBUG] Expected sender ID:', expectedId, 'Actual sender ID:', data.senderId)
                 if (!Number.isFinite(expectedId)) {
+                  console.log('[DEBUG] ERROR: Invalid expected ID')
                   setError('Enter sender device ID.')
                   return
                 }
                 if (data.senderId !== expectedId) {
+                  console.log('[DEBUG] ERROR: Sender ID mismatch')
                   setError('Sender device ID mismatch.')
                   return
                 }
+                console.log('[DEBUG] Sender ID matches. About to credit balance.')
                 setReceived(data)
                 setError('')
+                console.log('[DEBUG] About to check if account exists. Account:', account)
                 if (account) {
+                  console.log('[DEBUG] Account exists. Current balance:', account.balance, 'Amount to add:', data.amountPaise / 100)
                   const updated = {
                     ...account,
                     balance: account.balance + data.amountPaise / 100,
                   }
+                  console.log('[DEBUG] Updated account balance:', updated.balance)
                   persistAccount(updated)
+                  console.log('[DEBUG] Account persisted')
+                } else {
+                  console.log('[DEBUG] WARNING: Account is null, balance NOT credited')
                 }
               })
-              .catch((err) => setError(err.message || 'Invalid packet'))
+              .catch((err) => {
+                console.log('[DEBUG] Validation error:', err.message)
+                setError(err.message || 'Invalid packet')
+              })
             return
           }
           if (buffer.length > neededBits * 2) {
