@@ -80,6 +80,16 @@ function App() {
   const balance = account?.balance ?? 0
   const userId = account?.userId ?? 0
 
+  const persistAccount = (updated) => {
+    const accounts = loadAccounts()
+    const next = accounts.some((item) => item.userId === updated.userId)
+      ? accounts.map((item) => (item.userId === updated.userId ? updated : item))
+      : [...accounts, updated]
+    setAccount(updated)
+    saveAccounts(next)
+    saveCurrentAccountId(updated.userId)
+  }
+
   useEffect(() => {
     const accounts = loadAccounts()
     const currentId = loadCurrentAccountId()
@@ -138,8 +148,7 @@ function App() {
       await playBits(bits, { bitDuration: BIT_DURATION_SEC, gapDuration: 0.004 }, audioContextRef)
       setSendStatus('Sent via sound.')
       const updated = { ...account, balance: account.balance - amountValue }
-      setAccount(updated)
-      saveAccount(updated)
+      persistAccount(updated)
     } catch (err) {
       setError(err.message || 'Send failed.')
     }
@@ -158,6 +167,11 @@ function App() {
     if (listening) return
     setError('')
     setReceived(null)
+    const expectedId = Number.parseInt(counterpartyIdInput, 10)
+    if (!Number.isFinite(expectedId)) {
+      setError('Enter sender device ID.')
+      return
+    }
     try {
       decoderRef.current = await startDecoder({
         bitDuration: BIT_DURATION_SEC,
@@ -194,8 +208,7 @@ function App() {
                     ...account,
                     balance: account.balance + data.amountPaise / 100,
                   }
-                  setAccount(updated)
-                  saveAccount(updated)
+                  persistAccount(updated)
                 }
               })
               .catch((err) => setError(err.message || 'Invalid packet'))
@@ -234,9 +247,7 @@ function App() {
       balance: 500,
     }
     // Demo-only account system.
-    setAccount(newAccount)
-    saveAccounts([...accounts, newAccount])
-    saveCurrentAccountId(newAccount.userId)
+    persistAccount(newAccount)
   }
 
   const handleLogin = () => {
@@ -356,7 +367,6 @@ function App() {
           className={mode === 'receive' ? 'active' : ''}
           onClick={() => {
             setMode('receive')
-            startListening()
           }}
         >
           Receive
@@ -412,7 +422,11 @@ function App() {
               Listening...
             </div>
           ) : (
-            <button className="primary" onClick={startListening}>
+            <button
+              className="primary"
+              onClick={startListening}
+              disabled={!counterpartyIdInput.trim()}
+            >
               Start Listening
             </button>
           )}
@@ -431,6 +445,7 @@ function App() {
       {error && <p className="error">{error}</p>}
     </div>
   )
+  
 }
 
 export default App
